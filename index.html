@@ -1545,3 +1545,123 @@ function kirwaWelcomeVoice(role,schoolName){
 }
 </script>
 </body></html>
+<!-- FIREBASE CONNECT - KIRWA ANALYTICS -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDqmq_Aa4qNBJr4Pu8PygmKMSnIj2niwwE",
+  authDomain: "kirwa-analytics.firebaseapp.com",
+  projectId: "kirwa-analytics",
+  storageBucket: "kirwa-analytics.firebasestorage.app",
+  messagingSenderId: "847586470977",
+  appId: "1:847586470977:web:13b8b8e2debfa1774f6ac0",
+  measurementId: "G-7FX12FBM7P"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// 1. COUNT PAGE VIEWS - Every time someone opens website, +1
+db.collection("analytics").doc("test1").get().then((doc) => {
+  let views = 0;
+  if (doc.exists) { views = doc.data()["Page views"] || 0; }
+  db.collection("analytics").doc("test1").set({
+    "Page views": views + 1
+  });
+});
+
+// 2. SAVE LEARNER AFTER LOGIN
+function saveLearnerToFirebase(name, school, grade) {
+  db.collection("users").add({
+    name: name,
+    school: school,
+    grade: grade,
+    time: new Date()
+  });
+}
+</script>
+<!-- KIRWA SYNC - Teacher Does, Everyone Sees -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+// Same Firebase as your Page Views - Don't Change
+const firebaseConfigSync = {
+  apiKey: "AIzaSyDqm_Aa4qNBJrP4uP8ygmKMSnJj2niwWE",
+  authDomain: "kirwa-analytics.firebaseapp.com",
+  projectId: "kirwa-analytics",
+  storageBucket: "kirwa-analytics.firebasestorage.app",
+  messagingSenderId: "847586470977",
+  appId: "1:847586470977:web:13bb8b2e2debfa1774f6ac0"
+};
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfigSync);
+const syncDB = firebase.firestore();
+
+function getSchoolCode(){
+  // Try to find school code from your site
+  let code = localStorage.getItem('schoolCode') || localStorage.getItem('currentSchool') || localStorage.getItem('school_code') || "";
+  // Also try to find inside any saved data
+  if(!code){
+    for(let i=0;i<localStorage.length;i++){
+      let k = localStorage.key(i);
+      let v = localStorage.getItem(k) || "";
+      if(v.includes('6344') || v.includes('CHEBORGE') || v.includes('KIRWA')){ 
+        try{ let j = JSON.parse(v); if(j.schoolCode) code = j.schoolCode; if(j.code) code = j.code; }catch(e){}
+      }
+    }
+  }
+  // If still no code, use 6344 as default for Cheborge - you can change it
+  if(!code) code = "6344";
+  return code;
+}
+
+async function uploadToCloud(){
+  let code = getSchoolCode();
+  if(!code) return;
+  let allData = {};
+  for(let i=0;i<localStorage.length;i++){
+    let k = localStorage.key(i);
+    allData[k] = localStorage.getItem(k);
+  }
+  try{
+    await syncDB.collection('kirwa_sync').doc(String(code)).set({data: JSON.stringify(allData), updatedAt: new Date(), schoolCode: String(code)});
+    console.log('✅ Synced to Cloud for school', code);
+  }catch(e){ console.log('Sync upload error', e); }
+}
+
+async function downloadFromCloud(){
+  let code = getSchoolCode();
+  if(!code) return;
+  try{
+    let doc = await syncDB.collection('kirwa_sync').doc(String(code)).get();
+    if(doc.exists){
+      let saved = JSON.parse(doc.data().data);
+      // Only restore if cloud is newer / different
+      let changed = false;
+      for(let k in saved){
+        if(localStorage.getItem(k) !== saved[k]){ localStorage.setItem(k, saved[k]); changed = true; }
+      }
+      if(changed){
+        console.log('✅ Downloaded new data from Cloud - reloading');
+        location.reload();
+      }
+    }
+  }catch(e){ console.log('Sync download error', e); }
+}
+
+// 1. When teacher saves anything, upload after 2 seconds
+let syncTimer = null;
+const oldSetItem = localStorage.setItem;
+localStorage.setItem = function(k,v){
+  oldSetItem.apply(this, arguments);
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(uploadToCloud, 2000);
+};
+
+// 2. When page opens, download first
+downloadFromCloud();
+
+// 3. Every 10 seconds, check if teacher did something new
+setInterval(downloadFromCloud, 10000);
+setInterval(uploadToCloud, 15000);
+</script>
